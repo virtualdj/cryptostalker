@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -74,15 +74,36 @@ func isFileRandom(filename string) bool {
 	// Processing a file in this way also has the side effect of protecting against
 	// ransomware evading detection by encoding non-random data inside the file along
 	// with the encrypted data--and then removing the non-random cruft data later.
-	data, err := ioutil.ReadFile(filename)
+	f, err := os.OpenFile(filename, os.O_RDONLY, 0444)
 	if err != nil {
 		// Don't output an error if it is permission related
 		if !os.IsPermission(err) {
-			log.Printf("Error reading file: %s: %v\n", filename, err)
+			log.Printf("Error opening file: %s: %v\n", filename, err)
 		}
 		return false
 	}
-	return randumb.IsRandom(data)
+	defer f.Close()
+	
+	encrypted_pages := 0
+	total_pages := 0
+	buf := make([]byte, os.Getpagesize())
+	for {
+		n, err := f.Read(buf)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Printf("Error reading file: %s: %v\n", filename, err)
+			continue
+		}
+		if n > 0 {
+			total_pages++
+			if randumb.IsRandom(buf[:n]) {
+				encrypted_pages++
+			}
+		}
+	}
+	return (encrypted_pages * 100 / total_pages) > 80
 }
 
 func Stalk(opts options) {
